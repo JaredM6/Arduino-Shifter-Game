@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <AlmostRandom.h>
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -9,10 +10,11 @@
 /*
  *  Input Pins
  */
-// *Note* confirm button is connected to pin 2 since only pins 2 and 3 have ISR.
+// *Note* confirm and exit button are connected to pin 2 since only pins 2 and 3 have ISR.
 int confirmButton = 2;
-int rightSelectButton = 8;
-int leftSelectButton = 9;
+int exitButton = 3;
+int rightSelectButton = 4;
+int leftSelectButton = 5;
 
 
 /*
@@ -21,24 +23,26 @@ int leftSelectButton = 9;
 // Pin connected to DS of 74HC595
 int dataPin = 7;
 // Pin connected to SH_CP of 74HC595
-int clockPin = 3;
+int clockPin = 6;
 // Pin connected to ST_CP of 74HC595
-int latchPin = 4;
+int latchPin = 8;
 
 // Setup for display
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Mode selected by user. 0 is default, increase by 1 to the right and wrap around when going left
 uint8_t modeSelect = 0;
-String modeName = "Random Game!";
+String modeName;
+String gameModeNames[2] = {"Count 256", "Stoplight"};
+volatile bool confirmInterrupt = false;
+volatile bool exitInterrupt = false;
 
 
 /*
  * Custom Functions
  */
- 
 // Send the data to the shifter
-int ledControl(int number)
+void ledControl(int number)
 {
   // take the latchPin low so the LEDs don't change while you're sending in bits
   digitalWrite(latchPin, LOW);
@@ -50,87 +54,59 @@ int ledControl(int number)
 
 // Set the options for the display
 // *NOTE* text size ranges from 1-9
-int setOled(String output, int textSize, int xLoc=0, int yLoc=10)
+void setOled(String output, int textSize, int xLoc=0, int yLoc=10)
 {
   display.clearDisplay();
-  // Originally 0,10
   display.setCursor(xLoc, yLoc);
   display.setTextSize(textSize);
   display.println(output);
   display.display();
 }
 
+/*
+ * ISR Functions
+ */
+// ISR for pin 2
+void handleConfirmInterrupt()
+{
+  confirmInterrupt = true;
+}
+
+// ISR for pin 3
+void handleExitInterrupt()
+{
+  exitInterrupt = true;
+}
+
+String getGameModeName(uint8_t gameModeNumber)
+{
+  return gameModeNames[gameModeNumber];
+}
+
 // Activate the chosen mode for the user
-int activateMode(uint8_t modeSelect)
+void activateMode(uint8_t modeSelect)
 {
   switch(modeSelect)
   {
-    // Random game
-    case 0:
-      setOled("Random game!", 2);
-      break;
-    
     // Count 256
-    case 1:
-      String number;
+    case 0:
       for (int numberToDisplay = 0; numberToDisplay < 256; numberToDisplay++) 
       {
+        if (exitInterrupt == true)
+        {
+          exitInterrupt = false;
+          break;
+        }
         ledControl(numberToDisplay);
-        number = String(numberToDisplay);
-        setOled("Number: " + number + "\n\n(Press confirm to exit)", 2); 
+        setOled(String(numberToDisplay), 3);
         // pause before next value:
         delay(500);
       }
       break;
-
-     // Stoplight game
-     case 2:
-      setOled("Stoplight! TODO", 2);
+    
+    // Stoplight Game
+    case 1:
       break;
-  }
-}
-
-// TODO
-int shiftOutput(int numberToDisplay, int buttonPressed)
-{
-  // count from 0 to 255 and display the number
-  // on the LEDs
-  for (int numberToDisplay = 0; numberToDisplay < 256; numberToDisplay++) 
-  {
-     
-                                              
-    
-    // pause before next value:
-    
-    delay(500);
-  }
-
-  for (int i = 0; i < 10; i++)
-  {
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b10000001);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b01000010);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b00100100);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b00011000);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b00100100);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
-    digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0b01000010);
-    digitalWrite(latchPin, HIGH);
-    delay(100);
   }
 }
 
@@ -141,6 +117,7 @@ void setup()
 {
   // Inputs
   pinMode(confirmButton, INPUT_PULLUP);
+  pinMode(exitButton, INPUT_PULLUP);
   pinMode(rightSelectButton, INPUT_PULLUP);
   pinMode(leftSelectButton, INPUT_PULLUP);
   
@@ -149,13 +126,18 @@ void setup()
   pinMode(clockPin, OUTPUT);
   pinMode(dataPin, OUTPUT);
 
+  // Attach interrupts to buttons
+  // Confirm on pin 2
+  attachInterrupt(digitalPinToInterrupt(confirmButton), handleConfirmInterrupt, CHANGE);
+  // Exit on pin 3
+  attachInterrupt(digitalPinToInterrupt(exitButton), handleExitInterrupt, CHANGE);
+
   Serial.begin(115200);
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
     Serial.println(F("SSD1306 allocation failed"));
     for(;;);
   }
-
   display.setTextColor(WHITE);
   delay(1000);
 }
@@ -165,32 +147,36 @@ void loop()
   // Wait for a button to be pressed (pullup active, always high unless connected to ground
   if (digitalRead(confirmButton) == LOW)
   {
-    ledControl(0b00011000);
     activateMode(modeSelect);
   }
 
   else if (digitalRead(rightSelectButton) == LOW)
   {
-    ledControl(0b00001111);
-    modeName = "Count 256!";
     // Wait for button to finish being pressed
     while (digitalRead(rightSelectButton) == LOW) {}
-    modeSelect++;
+    // Gets the number of objects in the array (each string is 6 bytes, so 3*6 = 18 bytes, 18bytes/6bytes per entry = 3 entries) 
+    if (modeSelect < (sizeof(gameModeNames)/sizeof(gameModeNames[0])-1))
+    {
+      ++modeSelect;
+    }
   }
 
   else if (digitalRead(leftSelectButton) == LOW)
   {
-    ledControl(0b11110000);
-    setOled("Left!", 3);
     // Wait for button to finish being pressed
     while (digitalRead(leftSelectButton) == LOW) {}
-    modeSelect--;
+    // Don't wrap around for now
+    if (modeSelect != 0)
+    {
+      --modeSelect;
+    }
   }
 
   else
   {
     String modeNumber;
     modeNumber = modeSelect;
+    modeName = getGameModeName(modeSelect);
     // Menu Message
     setOled("    " + modeName + "\n\n<- L  Confirm  R ->\n\n" + modeNumber, 1);
     ledControl(modeSelect);
