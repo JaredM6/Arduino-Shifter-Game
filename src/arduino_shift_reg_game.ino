@@ -113,11 +113,34 @@ void activateMode(uint8_t modeSelect)
       setOled("Hit confirm on the blinking LED to score!", 1);
       uint8_t value = 1;
       uint8_t targetValue = 128;
-      while (true)
+      int delayValue = 1000;
+      bool levelWon = false;
+      bool wantToExit = false;
+
+      // Forever-loop contingent on whether or not they exit
+      while (wantToExit == false)
       {
-        // Shift over a bit
-        value = value << 1;
+        // Wrap around if on last LED
+        if (value == 128)
+        {
+          value = 1; 
+        }
+
+        else
+        {
+          // Shift over a bit
+          value = value << 1;
+        }
+        
         ledControl(value);
+
+        // Clear the interrupt flag, since the only window to click is the delay window. There is a
+        // scenario where they click it, set to true, and the value then changes to target (easy win).
+        confirmInterrupt = false;
+        // Pause length is the difficulty
+        delay(delayValue);
+        
+        // Did they hit the button at the correct value?
         if (confirmInterrupt == true)
         {
           if (value == targetValue)
@@ -125,16 +148,54 @@ void activateMode(uint8_t modeSelect)
             setOled("Nice! You win!", 2);
             // Audio chime
             delay(2000);
-            confirmInterrupt = false;
-            break;
+            levelWon = true;
           }
           confirmInterrupt = false;
         }
-        delay(500);
+
+        // They quit
+        if (exitInterrupt == true)
+        {
+          exitInterrupt = false;
+          setOled("Returning to main menu", 2);
+          wantToExit = true;
+        }
+
+        // Did they win? Time to check for next level or exit
+        if (levelWon == true)
+        {
+          // Set to false in case exit was tripped on accident
+          exitInterrupt = false;
+          confirmInterrupt = false;
+
+          // Only 2 options
+          while (true)
+          {
+            if (confirmInterrupt == true)
+            {
+              confirmInterrupt = false;
+              //setOled("Next level, good luck!", 1);
+              delay(2000);
+              delayValue = delayValue / 2;
+              levelWon = false;
+              // Clever way to wrap back to 1 right at the start
+              value = 128;
+              break;
+            }
+            else if (exitInterrupt == true)            
+            {
+              exitInterrupt = false;
+              //setOled("Returning to main menu", 1);
+              wantToExit = true;
+              break;
+            }
+            else
+            {
+              setOled("Next level?", 1);
+            }
+          }
+        }
       }
-      setOled("Next level? (confirm to confirm!)", 1);
-      // TODO loop and check before leaving
-      delay(2000);
       break;
   }
 }
