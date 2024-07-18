@@ -1,3 +1,5 @@
+
+
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -39,6 +41,22 @@ volatile bool exitInterrupt = false;
 
 
 /*
+ * ISR Functions
+ */
+// ISR for pin 2
+void handleConfirmInterrupt()
+{
+  confirmInterrupt = true;
+}
+
+// ISR for pin 3
+void handleExitInterrupt()
+{
+  exitInterrupt = true;
+}
+
+
+/*
  * Custom Functions
  */
 // Send the data to the shifter
@@ -63,21 +81,7 @@ void setOled(String output, int textSize, int xLoc=0, int yLoc=10)
   display.display();
 }
 
-/*
- * ISR Functions
- */
-// ISR for pin 2
-void handleConfirmInterrupt()
-{
-  confirmInterrupt = true;
-}
-
-// ISR for pin 3
-void handleExitInterrupt()
-{
-  exitInterrupt = true;
-}
-
+// Get the name of the game from the array
 String getGameModeName(uint8_t gameModeNumber)
 {
   return gameModeNames[gameModeNumber];
@@ -106,9 +110,35 @@ void activateMode(uint8_t modeSelect)
     
     // Stoplight Game
     case 1:
+      setOled("Hit confirm on the blinking LED to score!", 1);
+      uint8_t value = 1;
+      uint8_t targetValue = 128;
+      while (true)
+      {
+        // Shift over a bit
+        value = value << 1;
+        ledControl(value);
+        if (confirmInterrupt == true)
+        {
+          if (value == targetValue)
+          {
+            setOled("Nice! You win!", 2);
+            // Audio chime
+            delay(2000);
+            confirmInterrupt = false;
+            break;
+          }
+          confirmInterrupt = false;
+        }
+        delay(500);
+      }
+      setOled("Next level? (confirm to confirm!)", 1);
+      // TODO loop and check before leaving
+      delay(2000);
       break;
   }
 }
+
 
 /*
  * Arduino Functions (setup and loop)
