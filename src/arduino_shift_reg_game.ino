@@ -7,6 +7,8 @@
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define MAX_TEXT_LENGTH 64 // Buffer size for outputs
+#define GAME_COUNT 2
 
 
 /*
@@ -15,8 +17,8 @@
 // *Note* confirm and exit button are connected to pin 2 since only pins 2 and 3 have ISR.
 int confirmButton = 2;
 int exitButton = 3;
-int rightSelectButton = 4;
-int leftSelectButton = 5;
+int rightButton = 4;
+int leftButton = 5;
 
 
 /*
@@ -34,8 +36,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Mode selected by user. 0 is default, increase by 1 to the right and wrap around when going left
 uint8_t modeSelect = 0;
-String modeName;
-String gameModeNames[2] = {"Count 256", "Stoplight"};
+char modeName[MAX_TEXT_LENGTH];
+char gameModeNames[GAME_COUNT][MAX_TEXT_LENGTH] = {"Count 256", "Stoplight"};
 volatile bool confirmInterrupt = false;
 volatile bool exitInterrupt = false;
 
@@ -72,17 +74,25 @@ void ledControl(int number)
 
 // Set the options for the display
 // *NOTE* text size ranges from 1-9
-void setOled(String output, int textSize, int xLoc=0, int yLoc=10)
+void setOled(const char* output, int textSize, int xLoc=0, int yLoc=10)
 {
   display.clearDisplay();
   display.setCursor(xLoc, yLoc);
   display.setTextSize(textSize);
+  display.setTextColor(WHITE);
   display.println(output);
   display.display();
+  delay(200);
+}
+
+void waitForButtonPress(int buttonPin)
+{
+  while (digitalRead(buttonPin) == HIGH) {}
+  while (digitalRead(buttonPin) == LOW) {}
 }
 
 // Get the name of the game from the array
-String getGameModeName(uint8_t gameModeNumber)
+char* getGameModeName(uint8_t gameModeNumber)
 {
   return gameModeNames[gameModeNumber];
 }
@@ -102,7 +112,9 @@ void activateMode(uint8_t modeSelect)
           break;
         }
         ledControl(numberToDisplay);
-        setOled(String(numberToDisplay), 3);
+        char toDisplay[3];
+        sprintf(toDisplay, "%d", numberToDisplay);
+        setOled(toDisplay, 3);
         // pause before next value:
         delay(500);
       }
@@ -110,9 +122,41 @@ void activateMode(uint8_t modeSelect)
     
     // Stoplight Game
     case 1:
-      setOled("Hit confirm on the blinking LED to score!", 1);
+      uint8_t targetValue = 1;
+      // Wait for them to hit it, then wait for it to be released
+      setOled("Test!", 1);
+      waitForButtonPress(rightButton);
+      confirmInterrupt = false;
+      exitInterrupt = false;
+      bool done = false;
+      while (true)
+      {
+        setOled("Set?(confirm)\n\n   Other value ->", 1);
+        if (digitalRead(confirmButton) == LOW)
+        {
+           // Wait for single press to finish
+           while(digitalRead(confirmButton) == LOW) {}
+           break;
+        }
+
+        else if ((digitalRead(rightButton) == LOW) and (targetValue != 128))
+        {
+          while(digitalRead(rightButton) == LOW) {} 
+          targetValue = targetValue << 1;
+        }
+
+        else if ((digitalRead(leftButton) == LOW) and (targetValue != 1))
+        {
+          while(digitalRead(leftButton) == LOW) {}
+          targetValue = targetValue / 2;
+        }
+
+        else
+        {
+          ledControl(targetValue);
+        }
+      }
       uint8_t value = 1;
-      uint8_t targetValue = 128;
       int delayValue = 1000;
       bool levelWon = false;
       bool wantToExit = false;
@@ -174,7 +218,6 @@ void activateMode(uint8_t modeSelect)
             if (confirmInterrupt == true)
             {
               confirmInterrupt = false;
-              //setOled("Next level, good luck!", 1);
               delay(2000);
               delayValue = delayValue / 2;
               levelWon = false;
@@ -185,7 +228,6 @@ void activateMode(uint8_t modeSelect)
             else if (exitInterrupt == true)            
             {
               exitInterrupt = false;
-              //setOled("Returning to main menu", 1);
               wantToExit = true;
               break;
             }
@@ -209,8 +251,8 @@ void setup()
   // Inputs
   pinMode(confirmButton, INPUT_PULLUP);
   pinMode(exitButton, INPUT_PULLUP);
-  pinMode(rightSelectButton, INPUT_PULLUP);
-  pinMode(leftSelectButton, INPUT_PULLUP);
+  pinMode(rightButton, INPUT_PULLUP);
+  pinMode(leftButton, INPUT_PULLUP);
   
   // Outputs
   pinMode(latchPin, OUTPUT);
@@ -229,7 +271,6 @@ void setup()
     Serial.println(F("SSD1306 allocation failed"));
     for(;;);
   }
-  display.setTextColor(WHITE);
   delay(1000);
 }
 
@@ -241,10 +282,10 @@ void loop()
     activateMode(modeSelect);
   }
 
-  else if (digitalRead(rightSelectButton) == LOW)
+  else if (digitalRead(rightButton) == LOW)
   {
     // Wait for button to finish being pressed
-    while (digitalRead(rightSelectButton) == LOW) {}
+    while (digitalRead(rightButton) == LOW) {}
     // Gets the number of objects in the array (each string is 6 bytes, so 3*6 = 18 bytes, 18bytes/6bytes per entry = 3 entries) 
     if (modeSelect < (sizeof(gameModeNames)/sizeof(gameModeNames[0])-1))
     {
@@ -252,10 +293,10 @@ void loop()
     }
   }
 
-  else if (digitalRead(leftSelectButton) == LOW)
+  else if (digitalRead(leftButton) == LOW)
   {
     // Wait for button to finish being pressed
-    while (digitalRead(leftSelectButton) == LOW) {}
+    while (digitalRead(leftButton) == LOW) {}
     // Don't wrap around for now
     if (modeSelect != 0)
     {
@@ -265,11 +306,15 @@ void loop()
 
   else
   {
-    String modeNumber;
-    modeNumber = modeSelect;
-    modeName = getGameModeName(modeSelect);
+    // Get a string of the number
+    char toDisplay[3];
+    sprintf(toDisplay, "%d", modeSelect);
+    // Get the name from the index
+    char buf[MAX_TEXT_LENGTH];
+    const char* modeName = getGameModeName(modeSelect);
     // Menu Message
-    setOled("    " + modeName + "\n\n<- L  Confirm  R ->\n\n" + modeNumber, 1);
+    snprintf(buf, sizeof(buf), "    %s\n\n<- L  Confirm  R ->\n\n%s", modeName, toDisplay);
+    setOled(buf, 1);
     ledControl(modeSelect);
   }  
 }
