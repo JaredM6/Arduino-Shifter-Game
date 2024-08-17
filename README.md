@@ -1,4 +1,4 @@
-# Arduino-Shifter-Game
+# Handheld-Gamesystem-v1
 
 ## Purpose
 This is my first solo project dealing with microcontroller programming, circuit design, board design, PCB layout, routing, printing, soldering, and testing. The only real goal of this project is to learn and improve upon what I learned at school. 
